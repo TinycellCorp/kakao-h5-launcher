@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>카카오 H5 게임 런처</title>
+  <style>
+    :root { color-scheme: light; --bg:#f5f6f8; --card:#fff; --line:#e9eaed; --txt:#1c1c1e; --sub:#888; --kakao:#FEE500; }
+    * { box-sizing: border-box; }
+    body { font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif; margin:0; background:var(--bg); color:var(--txt); }
+    .wrap { max-width:600px; margin:0 auto; padding:16px 14px 40px; }
+    header { position:sticky; top:0; background:var(--bg); padding:8px 0 12px; z-index:10; }
+    h1 { font-size:18px; margin:4px 0 12px; display:flex; align-items:center; gap:8px; }
+    h1 .dot { width:10px; height:10px; border-radius:50%; background:var(--kakao); box-shadow:0 0 0 3px rgba(254,229,0,.25); }
+    .search { width:100%; padding:11px 14px; border:1px solid var(--line); border-radius:10px; font-size:15px; background:#fff; }
+    .meta { font-size:12px; color:var(--sub); margin:10px 2px 4px; }
+    .group-title { font-size:13px; font-weight:800; color:#555; margin:18px 2px 8px; padding-left:6px; border-left:3px solid var(--kakao); }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    button.game { display:flex; flex-direction:column; gap:4px; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 12px; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.04); transition:transform .05s; text-align:left; color:var(--txt); font:inherit; }
+    button.game:active { transform:scale(.97); }
+    button.game .name { font-size:14px; font-weight:700; line-height:1.3; }
+    button.game .id { font-size:11px; color:var(--sub); }
+    .hidden { display:none !important; }
+    .empty { text-align:center; color:var(--sub); padding:40px 0; font-size:14px; }
+
+    /* 모달 */
+    .overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:flex-end; justify-content:center; z-index:100; }
+    .overlay.show { display:flex; }
+    .sheet { background:#fff; width:100%; max-width:600px; border-radius:18px 18px 0 0; padding:18px 16px calc(18px + env(safe-area-inset-bottom)); animation:up .18s ease; }
+    @keyframes up { from { transform:translateY(100%); } to { transform:translateY(0); } }
+    .sheet h2 { font-size:16px; margin:2px 0 2px; }
+    .sheet .sub { font-size:12px; color:var(--sub); margin:0 0 14px; }
+    .opt { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; text-decoration:none; padding:14px 16px; border-radius:11px; font-size:15px; font-weight:700; margin-bottom:9px; border:1px solid var(--line); }
+    .opt small { font-size:11px; font-weight:600; opacity:.7; }
+    .opt.qa   { background:#fff8d6; color:#8a6d00; }
+    .opt.qaov { background:#fff8d6; color:#8a6d00; }
+    .opt.live { background:#e2f6e7; color:#1e8449; }
+    .opt.liveov { background:#e2f6e7; color:#1e8449; }
+    .opt.disabled { opacity:.4; pointer-events:none; }
+    .opt .tag { font-size:10px; background:rgba(0,0,0,.08); padding:2px 7px; border-radius:999px; }
+    .close { width:100%; padding:13px; border:none; background:#eef0f3; border-radius:11px; font-size:14px; font-weight:700; color:#555; cursor:pointer; margin-top:4px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="dot"></span>카카오 H5 게임 런처</h1>
+    <input class="search" id="q" type="search" placeholder="게임 이름 / 번호 검색…" autocomplete="off" />
+    <div class="meta" id="meta"></div>
+  </header>
+  <div id="list"></div>
+</div>
+
+<!-- 진입 옵션 모달 -->
+<div class="overlay" id="overlay">
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true">
+    <h2 id="m-name"></h2>
+    <p class="sub" id="m-sub"></p>
+    <a class="opt qa"     id="m-qa"     target="_blank" rel="noopener">QA <span class="tag">기본</span></a>
+    <a class="opt qaov"   id="m-qaov"   target="_blank" rel="noopener">QA + 로그오버레이 <span class="tag">logOverlay</span></a>
+    <a class="opt live"   id="m-live"   target="_blank" rel="noopener">Live <span class="tag">기본</span></a>
+    <a class="opt liveov" id="m-liveov" target="_blank" rel="noopener">Live + 로그오버레이 <span class="tag">logOverlay</span></a>
+    <button class="close" id="m-close">닫기</button>
+  </div>
+</div>
+
+<script>
+// no  id     name              qaCode      liveCode(없으면 null)
+const GAMES = [
+  { g:'서비스', no:1,  id:'20703', name:'프렌즈봉봉',        qa:'vj13lyqj', live:'vj13lyqj' },
+  { g:'서비스', no:2,  id:'20704', name:'프렌즈 타일매치',   qa:'jvff7x0f', live:'jvff7x0f' },
+  { g:'서비스', no:3,  id:'20709', name:'때려때려 두더지',   qa:'teafojj6', live:'teafojj6' },
+  { g:'서비스', no:4,  id:'20710', name:'슈팅 애로우',       qa:'s1sfqdmm', live:'s1sfqdmm' },
+  { g:'서비스', no:5,  id:'20711', name:'틀린그림찾기',      qa:'6dxlejdq', live:'6dxlejdq' },
+  { g:'서비스', no:6,  id:'20713', name:'머지디펜스',        qa:'fcyqcudh', live:'fcyqcudh' },
+  { g:'서비스', no:7,  id:'20717', name:'미식왕 꿀꿀',       qa:'pegrvqko', live:'pegrvqko' },
+  { g:'서비스', no:8,  id:'20736', name:'볼트 앤 너트 소트', qa:'oamqmrmz', live:'oamqmrmz' },
+  { g:'서비스', no:9,  id:'20708', name:'사과 10 크러쉬',    qa:'qde010xj', live:'qde010xj' },
+  { g:'서비스', no:10, id:'20712', name:'점프 타워',         qa:'65jh7xkh', live:'65jh7xkh' },
+  { g:'서비스', no:11, id:'20719', name:'마인 브레이커',     qa:'1431hc1f', live:'1431hc1f' },
+  { g:'서비스', no:12, id:'20722', name:'푸딩 타워',         qa:'6n98zvfs', live:'6n98zvfs' },
+  { g:'서비스', no:13, id:'20724', name:'숲속친구 연결퍼즐', qa:'xt36ugec', live:'xt36ugec' },
+  { g:'서비스', no:14, id:'20727', name:'터치터치 바스켓',   qa:'jc0sea67', live:'jc0sea67' },
+  { g:'서비스', no:15, id:'20728', name:'숲속의 나무꾼',     qa:'ozaorqs9', live:'ozaorqs9' },
+  { g:'서비스', no:16, id:'20729', name:'매직버블팟',        qa:'mcnkhsli', live:'mcnkhsli' },
+  { g:'서비스', no:17, id:'20736', name:'프렌즈 3매치 퍼즐', qa:'8crgrjlt', live:'8crgrjlt' },
+  { g:'서비스', no:18, id:'20737', name:'점핑 프렌즈',       qa:'p8bwhot1', live:'p8bwhot1' },
+  { g:'서비스', no:19, id:'20761', name:'라이언의 디저트 소트', qa:'nj0x6z3u', live:'nj0x6z3u' },
+  { g:'서비스', no:20, id:'20740', name:'프렌즈링크팝',      qa:'vr6o4up6', live:'vr6o4up6' },
+  { g:'서비스', no:21, id:'20742', name:'요리조리 비행기',   qa:'dvtoz7uq', live:'dvtoz7uq' },
+  { g:'서비스', no:22, id:'20743', name:'고양이섬 2048',     qa:'p9fhosom', live:'p9fhosom' },
+  { g:'서비스', no:23, id:'20845', name:'샌드트리스',        qa:'hnu51zbw', live:'hnu51zbw' },
+  { g:'서비스', no:24, id:'20747', name:'플라워 소트',       qa:'9ws6ub4s', live:'9ws6ub4s' },
+  { g:'서비스', no:25, id:'20748', name:'매치냥',            qa:'mhilusja', live:'mhilusja' },
+  // 1차 업데이트 — Live URL 미발급분은 QA 코드를 Live 호스트에 그대로 적용
+  { g:'1차 업데이트', no:26, id:'', name:'네오의 밥도둑',    qa:'bgrpeuds', live:'bgrpeuds' },
+  { g:'1차 업데이트', no:27, id:'', name:'버니 월드 2048',   qa:'1ayvw3jf', live:'1ayvw3jf' },
+  { g:'1차 업데이트', no:28, id:'', name:'캐논 팡팡',        qa:'7cj3eg3x', live:'7cj3eg3x' },
+  { g:'1차 업데이트', no:29, id:'', name:'해피 워터 컵',     qa:'w5psctp1', live:'w5psctp1' },
+  { g:'1차 업데이트', no:30, id:'', name:'드롭 더 볼',       qa:'4b2us7wa', live:'4b2us7wa' },
+  { g:'1차 업데이트', no:31, id:'', name:'3매치 사천성',     qa:'2a92ziu0', live:'2a92ziu0' },
+  { g:'1차 업데이트', no:32, id:'', name:'머지 브레인롯',    qa:'fe242akk', live:'fe242akk' },
+  { g:'1차 업데이트', no:33, id:'', name:'아슬아슬 비행기',  qa:'t4ovxhfb', live:'t4ovxhfb' },
+  { g:'1차 업데이트', no:34, id:'', name:'울소트 퍼즐',      qa:'52c1wzya', live:'52c1wzya' },
+  { g:'1차 업데이트', no:35, id:'', name:'도트 매니아',      qa:'l7tiepxy', live:'l7tiepxy' },
+];
+
+const HOST = { qa:'qa-gameplay.game.kakao.com', live:'gameplay.game.kakao.com' };
+function urlFor(game, env, overlay) {
+  const code = env === 'live' ? game.live : game.qa;
+  if (!code) return null;
+  let u = `https://${HOST[env]}/h5/${code}/index.html?provider=kakao`;
+  if (overlay) u += '&logOverlay=true';
+  return u;
+}
+
+const listEl = document.getElementById('list');
+const qEl = document.getElementById('q');
+const metaEl = document.getElementById('meta');
+
+function render() {
+  const kw = qEl.value.trim().toLowerCase();
+  const filtered = GAMES.filter(g =>
+    !kw || g.name.toLowerCase().includes(kw) || (g.id && g.id.includes(kw)) || String(g.no).includes(kw)
+  );
+  listEl.innerHTML = '';
+  metaEl.textContent = `${filtered.length}개 · 탭하면 진입 옵션 선택`;
+  if (!filtered.length) { listEl.innerHTML = '<div class="empty">검색 결과 없음</div>'; return; }
+
+  let lastGroup = null, grid = null;
+  filtered.forEach(g => {
+    if (g.g !== lastGroup) {
+      lastGroup = g.g;
+      const t = document.createElement('div');
+      t.className = 'group-title'; t.textContent = g.g;
+      listEl.appendChild(t);
+      grid = document.createElement('div'); grid.className = 'grid';
+      listEl.appendChild(grid);
+    }
+    const b = document.createElement('button');
+    b.className = 'game';
+    b.innerHTML = `<span class="name">${g.no}. ${g.name}</span>
+      <span class="id">${g.id ? 'ID ' + g.id : 'ID 미정'}${g.live ? '' : ' · QA만'}</span>`;
+    b.addEventListener('click', () => openSheet(g));
+    grid.appendChild(b);
+  });
+}
+
+// ===== 모달 =====
+const overlay = document.getElementById('overlay');
+function setOpt(el, url) {
+  if (url) { el.href = url; el.classList.remove('disabled'); }
+  else { el.removeAttribute('href'); el.classList.add('disabled'); }
+}
+function openSheet(g) {
+  document.getElementById('m-name').textContent = `${g.no}. ${g.name}`;
+  document.getElementById('m-sub').textContent = g.id ? `ID ${g.id}` : '진입 환경을 선택하세요';
+  setOpt(document.getElementById('m-qa'),     urlFor(g,'qa',false));
+  setOpt(document.getElementById('m-qaov'),   urlFor(g,'qa',true));
+  setOpt(document.getElementById('m-live'),   urlFor(g,'live',false));
+  setOpt(document.getElementById('m-liveov'), urlFor(g,'live',true));
+  overlay.classList.add('show');
+}
+function closeSheet() { overlay.classList.remove('show'); }
+document.getElementById('m-close').addEventListener('click', closeSheet);
+overlay.addEventListener('click', e => { if (e.target === overlay) closeSheet(); });
+
+qEl.addEventListener('input', render);
+render();
+</script>
+</body>
+</html>
