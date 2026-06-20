@@ -30,7 +30,13 @@
     @keyframes up { from { transform:translateY(100%); } to { transform:translateY(0); } }
     .sheet h2 { font-size:16px; margin:2px 0 2px; }
     .sheet .sub { font-size:12px; color:var(--sub); margin:0 0 14px; }
-    .opt { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; text-decoration:none; padding:14px 16px; border-radius:11px; font-size:15px; font-weight:700; margin-bottom:9px; border:1px solid var(--line); }
+    .opt-row { display:flex; align-items:stretch; gap:8px; margin-bottom:9px; }
+    .opt { flex:1; display:flex; align-items:center; justify-content:space-between; gap:10px; text-decoration:none; padding:14px 16px; border-radius:11px; font-size:15px; font-weight:700; border:1px solid var(--line); }
+    .copy { flex:0 0 auto; width:54px; border:1px solid var(--line); background:#fff; border-radius:11px; font:inherit; font-size:13px; font-weight:700; color:#555; cursor:pointer; }
+    .copy:active { transform:scale(.95); }
+    .copy.disabled { opacity:.4; pointer-events:none; }
+    .toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%); background:#1c1c1e; color:#fff; padding:10px 18px; border-radius:999px; font-size:13px; font-weight:700; z-index:200; opacity:0; transition:opacity .2s; pointer-events:none; }
+    .toast.show { opacity:1; }
     .opt small { font-size:11px; font-weight:600; opacity:.7; }
     .opt.qa   { background:#fff8d6; color:#8a6d00; }
     .opt.qaov { background:#fff8d6; color:#8a6d00; }
@@ -51,15 +57,29 @@
   <div id="list"></div>
 </div>
 
+<div class="toast" id="toast"></div>
+
 <!-- 진입 옵션 모달 -->
 <div class="overlay" id="overlay">
   <div class="sheet" id="sheet" role="dialog" aria-modal="true">
     <h2 id="m-name"></h2>
     <p class="sub" id="m-sub"></p>
-    <a class="opt qa"     id="m-qa"     target="_blank" rel="noopener">QA <span class="tag">기본</span></a>
-    <a class="opt qaov"   id="m-qaov"   target="_blank" rel="noopener">QA + 로그오버레이 <span class="tag">logOverlay</span></a>
-    <a class="opt live"   id="m-live"   target="_blank" rel="noopener">Live <span class="tag">기본</span></a>
-    <a class="opt liveov" id="m-liveov" target="_blank" rel="noopener">Live + 로그오버레이 <span class="tag">logOverlay</span></a>
+    <div class="opt-row">
+      <a class="opt qa"   id="m-qa"   target="_blank" rel="noopener">QA <span class="tag">기본</span></a>
+      <button class="copy" data-for="m-qa" title="링크 복사">복사</button>
+    </div>
+    <div class="opt-row">
+      <a class="opt qaov" id="m-qaov" target="_blank" rel="noopener">QA + 로그오버레이 <span class="tag">logOverlay</span></a>
+      <button class="copy" data-for="m-qaov" title="링크 복사">복사</button>
+    </div>
+    <div class="opt-row">
+      <a class="opt live"   id="m-live"   target="_blank" rel="noopener">Live <span class="tag">기본</span></a>
+      <button class="copy" data-for="m-live" title="링크 복사">복사</button>
+    </div>
+    <div class="opt-row">
+      <a class="opt liveov" id="m-liveov" target="_blank" rel="noopener">Live + 로그오버레이 <span class="tag">logOverlay</span></a>
+      <button class="copy" data-for="m-liveov" title="링크 복사">복사</button>
+    </div>
     <button class="close" id="m-close">닫기</button>
   </div>
 </div>
@@ -106,12 +126,15 @@ const GAMES = [
 ];
 
 const HOST = { qa:'qa-gameplay.game.kakao.com', live:'gameplay.game.kakao.com' };
+// 카카오 테스트 공용 진입 링크 — 게임 URL을 url 파라미터로 감싸 채팅방 전송 후 실행 확인
+const TEST_ENTRY = 'https://gameplay.kakao.com/entry/test/games?url=';
 function urlFor(game, env, overlay) {
   const code = env === 'live' ? game.live : game.qa;
   if (!code) return null;
   let u = `https://${HOST[env]}/h5/${code}/index.html?provider=kakao`;
   if (overlay) u += '&logOverlay=true';
-  return u;
+  // 게임 URL을 인코딩해 테스트 공용 링크 뒤에 부착 (외부 쿼리와 분리)
+  return TEST_ENTRY + encodeURIComponent(u);
 }
 
 const listEl = document.getElementById('list');
@@ -231,7 +254,39 @@ const overlay = document.getElementById('overlay');
 function setOpt(el, url) {
   if (url) { el.href = url; el.classList.remove('disabled'); }
   else { el.removeAttribute('href'); el.classList.add('disabled'); }
+  // 같은 옵션의 복사 버튼도 동기화
+  const copyBtn = document.querySelector(`.copy[data-for="${el.id}"]`);
+  if (copyBtn) copyBtn.classList.toggle('disabled', !url);
 }
+
+// ===== 링크 복사 + 토스트 =====
+let toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 1500);
+}
+async function copyLink(url) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(url);
+    } else { // file:// 등 비보안 컨텍스트 폴백
+      const ta = document.createElement('textarea');
+      ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); ta.remove();
+    }
+    showToast('링크 복사됨 · 채팅방에 붙여넣기');
+  } catch (e) { showToast('복사 실패'); }
+}
+document.querySelectorAll('.copy').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const a = document.getElementById(btn.dataset.for);
+    if (a && a.href && !a.classList.contains('disabled')) copyLink(a.href);
+  });
+});
 function openSheet(g) {
   document.getElementById('m-name').textContent = `${g.no}. ${g.name}`;
   document.getElementById('m-sub').textContent = g.id ? `ID ${g.id}` : '진입 환경을 선택하세요';
