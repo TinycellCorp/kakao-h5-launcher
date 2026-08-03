@@ -80,6 +80,11 @@
       <a class="opt liveov" id="m-liveov" target="_blank" rel="noopener">Live + 로그오버레이 <span class="tag">logOverlay</span></a>
       <button class="copy" data-for="m-liveov" title="링크 복사">복사</button>
     </div>
+    <!-- 게임별 전용 진입(QA 한정). GAMES 항목에 extra 가 있을 때만 노출된다. -->
+    <div class="opt-row" id="m-extra-row" hidden>
+      <a class="opt qaov" id="m-extra" target="_blank" rel="noopener"><span id="m-extra-label"></span> <span class="tag" id="m-extra-tag"></span></a>
+      <button class="copy" data-for="m-extra" title="링크 복사">복사</button>
+    </div>
     <button class="close" id="m-close">닫기</button>
   </div>
 </div>
@@ -92,7 +97,11 @@ const GAMES = [
   { g:'서비스', no:3,  id:'20709', name:'때려때려 두더지',   qa:'teafojj6', live:'teafojj6' },
   { g:'서비스', no:4,  id:'20710', name:'슈팅 애로우',       qa:'s1sfqdmm', live:'s1sfqdmm' },
   { g:'서비스', no:5,  id:'20711', name:'틀린그림찾기',      qa:'6dxlejdq', live:'6dxlejdq' },
-  { g:'서비스', no:6,  id:'20713', name:'머지디펜스',        qa:'fcyqcudh', live:'fcyqcudh' },
+  // extra: QA 전용 추가 진입 1종. config 강제 실패로 (3000) 차단 화면을 결정적으로 재현한다.
+  //   손으로 망을 끊는 방식은 SDK init 에서 먼저 걸려(9999) 이 경로에 도달하지 못한다.
+  //   다이얼로그의 "다시 시도" 를 누르면 플래그가 해제되며 정상 진입한다.
+  { g:'서비스', no:6,  id:'20713', name:'머지디펜스',        qa:'fcyqcudh', live:'fcyqcudh',
+    extra:{ label:'QA + config 강제실패', tag:'3000', q:'forceConfigFail=1' } },
   { g:'서비스', no:7,  id:'20717', name:'미식왕 꿀꿀',       qa:'pegrvqko', live:'pegrvqko' },
   { g:'서비스', no:8,  id:'20736', name:'볼트 앤 너트 소트', qa:'oamqmrmz', live:'oamqmrmz' },
   { g:'서비스', no:9,  id:'20708', name:'사과 10 크러쉬',    qa:'qde010xj', live:'qde010xj' },
@@ -143,11 +152,12 @@ const GAMES = [
 const HOST = { qa:'qa-gameplay.game.kakao.com', live:'gameplay.game.kakao.com' };
 // 카카오 테스트 공용 진입 링크 — 게임 URL을 url 파라미터로 감싸 채팅방 전송 후 실행 확인
 const TEST_ENTRY = 'https://gameplay.kakao.com/entry/test/games?url=';
-function urlFor(game, env, overlay) {
+function urlFor(game, env, overlay, extraQuery) {
   const code = env === 'live' ? game.live : game.qa;
   if (!code) return null;
   let u = `https://${HOST[env]}/h5/${code}/index.html?provider=kakao`;
   if (overlay) u += '&logOverlay=true';
+  if (extraQuery) u += '&' + extraQuery;
   // 게임 URL을 인코딩해 테스트 공용 링크 뒤에 부착 (외부 쿼리와 분리)
   return TEST_ENTRY + encodeURIComponent(u);
 }
@@ -309,6 +319,16 @@ function openSheet(g) {
   setOpt(document.getElementById('m-qaov'),   urlFor(g,'qa',true));
   setOpt(document.getElementById('m-live'),   urlFor(g,'live',false));
   setOpt(document.getElementById('m-liveov'), urlFor(g,'live',true));
+  // 게임별 전용 진입 — extra 가 있는 게임에서만 행을 노출한다.
+  const extraRow = document.getElementById('m-extra-row');
+  if (g.extra) {
+    document.getElementById('m-extra-label').textContent = g.extra.label;
+    document.getElementById('m-extra-tag').textContent = g.extra.tag || '';
+    setOpt(document.getElementById('m-extra'), urlFor(g,'qa',false,g.extra.q));
+    extraRow.hidden = false;
+  } else {
+    extraRow.hidden = true;
+  }
   overlay.classList.add('show');
 }
 function closeSheet() { overlay.classList.remove('show'); }
