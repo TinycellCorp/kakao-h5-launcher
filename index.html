@@ -85,6 +85,11 @@
       <a class="opt qaov" id="m-extra" target="_blank" rel="noopener"><span id="m-extra-label"></span> <span class="tag" id="m-extra-tag"></span></a>
       <button class="copy" data-for="m-extra" title="링크 복사">복사</button>
     </div>
+    <!-- hi5games 등 직접 URL 진입. GAMES 항목에 url 이 있을 때만 노출되고 kakao 4종 행은 숨는다. -->
+    <div class="opt-row" id="m-url-row" hidden>
+      <a class="opt live" id="m-url" target="_blank" rel="noopener">게임 열기 <span class="tag">직접 URL</span></a>
+      <button class="copy" data-for="m-url" title="링크 복사">복사</button>
+    </div>
     <button class="close" id="m-close">닫기</button>
   </div>
 </div>
@@ -148,6 +153,13 @@ const GAMES = [
   // 가로(landscape) 고정 — 세로 웹뷰에서 게임만 회전해 GNB/토스트 배치 확인이 별도로 필요하므로 그룹 분리
   { g:'가로게임', no:48, id:'20756', name:'프렌즈 러너',      qa:'niopwg1e', live:'niopwg1e' },
   { g:'가로게임', no:49, id:'20741', name:'3D 프루츠 컷',     qa:'lggtdz2v', live:'lggtdz2v' },
+  // hi5games 플랫폼 — kakao gameplay 호스트·업로드 코드 체계가 아닌 고정 URL 직접 진입.
+  // url 필드가 있으면 모달에서 kakao 4종 옵션 대신 '게임 열기' 단일 행이 노출된다.
+  { g:'hi5games', no:50, name:'라이언붐붐',             url:'https://www.hi5games.top/games/47FriendsDefense/index.html' },
+  { g:'hi5games', no:51, name:'프렌즈 서바이벌 특공대', url:'https://www.hi5games.top/games/48TangTang/index.html' },
+  { g:'hi5games', no:52, name:'레전드 오브 히어로',     url:'https://www.hi5games.top/games/HeroAutoPk/index.html' },
+  { g:'hi5games', no:53, name:'로드 서바이벌',          url:'https://www.hi5games.top/games/Z-RoadSurvival/index.html' },
+  { g:'hi5games', no:54, name:'아처히어로',             url:'https://www.hi5games.top/games/ArcheryHero3D/index.html' },
   // 테스트 — 백엔드 제공 임시 h5Id(20797)/code(padypuo3). serverType auto 검증용(QA→qa, Live→live 자동감지)
   { g:'테스트', no:47, id:'20797', name:'테스트', qa:'padypuo3', live:'padypuo3' },
 ];
@@ -252,6 +264,7 @@ function render() {
       || (g.id && g.id.includes(kw))
       || (g.qa && g.qa.includes(kw))
       || (g.live && g.live.includes(kw))
+      || (g.url && g.url.toLowerCase().includes(kw))
       || String(g.no).includes(kw);
   });
   listEl.innerHTML = '';
@@ -271,7 +284,7 @@ function render() {
     const b = document.createElement('button');
     b.className = 'game';
     b.innerHTML = `<span class="name">${g.no}. ${g.name}</span>
-      <span class="id">${g.id ? 'ID ' + g.id : 'ID 미정'}${g.live ? '' : ' · QA만'}</span>`;
+      <span class="id">${g.id ? 'ID ' + g.id : (g.url ? '직접 URL' : 'ID 미정')}${(g.live || g.url) ? '' : ' · QA만'}</span>`;
     b.addEventListener('click', () => openSheet(g));
     grid.appendChild(b);
   });
@@ -317,20 +330,30 @@ document.querySelectorAll('.copy').forEach(btn => {
 });
 function openSheet(g) {
   document.getElementById('m-name').textContent = `${g.no}. ${g.name}`;
-  document.getElementById('m-sub').textContent = g.id ? `ID ${g.id}` : '진입 환경을 선택하세요';
-  setOpt(document.getElementById('m-qa'),     urlFor(g,'qa',false));
-  setOpt(document.getElementById('m-qaov'),   urlFor(g,'qa',true));
-  setOpt(document.getElementById('m-live'),   urlFor(g,'live',false));
-  setOpt(document.getElementById('m-liveov'), urlFor(g,'live',true));
+  const direct = !!g.url;
+  document.getElementById('m-sub').textContent = g.id ? `ID ${g.id}` : (direct ? 'hi5games · 직접 URL' : '진입 환경을 선택하세요');
+  // kakao 4종 옵션 행 — 직접 URL 게임에서는 숨긴다.
+  // (.hidden 클래스 사용: hidden 속성은 .opt-row{display:flex} 저자 스타일에 눌려 동작하지 않는다)
+  ['m-qa','m-qaov','m-live','m-liveov'].forEach(id => {
+    document.getElementById(id).closest('.opt-row').classList.toggle('hidden', direct);
+  });
+  if (!direct) {
+    setOpt(document.getElementById('m-qa'),     urlFor(g,'qa',false));
+    setOpt(document.getElementById('m-qaov'),   urlFor(g,'qa',true));
+    setOpt(document.getElementById('m-live'),   urlFor(g,'live',false));
+    setOpt(document.getElementById('m-liveov'), urlFor(g,'live',true));
+  }
+  // 직접 URL 진행 — url 이 있는 게임에서만 단일 행을 노출한다.
+  const urlRow = document.getElementById('m-url-row');
+  urlRow.classList.toggle('hidden', !direct);
+  if (direct) setOpt(document.getElementById('m-url'), g.url);
   // 게임별 전용 진입 — extra 가 있는 게임에서만 행을 노출한다.
   const extraRow = document.getElementById('m-extra-row');
-  if (g.extra) {
+  extraRow.classList.toggle('hidden', !g.extra || direct);
+  if (g.extra && !direct) {
     document.getElementById('m-extra-label').textContent = g.extra.label;
     document.getElementById('m-extra-tag').textContent = g.extra.tag || '';
     setOpt(document.getElementById('m-extra'), urlFor(g,'qa',false,g.extra.q));
-    extraRow.hidden = false;
-  } else {
-    extraRow.hidden = true;
   }
   overlay.classList.add('show');
 }
