@@ -66,20 +66,76 @@ for (const k in EXTRA) { if (!CODE2NAMES[k]) CODE2NAMES[k] = EXTRA[k]; }
 
 // 빌드 폴더 후보를 만들어 실제 index.html 이 있는 경로를 고른다.
 //   폴더 구조가 제각각이라(평면 / web-mobile 2단계 / Egret bin-release) 전부 훑는다.
+// 빌드 산출물의 디버그 지문을 읽는다.
+//   CC3: settings.<hash>.json 의 engine.debug (없으면 debug)
+//   CC2: src/settings.js 의 debug:true|false
+//   판정 불가면 null 을 돌려주고 폴더명으로 2차 판정한다.
+function buildFlag(dir) {
+    // settings 는 엔진/버전마다 루트에도 src/ 에도, .json 으로도 .js 로도 나온다.
+    //   CC2.4  → src/settings.<hash>.js  안의 debug:true|false
+    //   CC3.8  → src/settings.<hash>.json 안의 engine.debug
+    // 한쪽만 훑으면 대부분 판독 불가로 떨어져 폴더명에만 기대게 된다.
+    const dirs = [dir, path.join(dir, 'src'), path.join(dir, 'assets', 'main')];
+    for (const d of dirs) {
+        let files = [];
+        try { files = fs.readdirSync(d); } catch (e) { continue; }
+        for (const f of files) {
+            if (!/^settings.*\.(json|js)$/i.test(f)) continue;
+            let raw = '';
+            try { raw = fs.readFileSync(path.join(d, f), 'utf8'); } catch (e) { continue; }
+            if (/\.json$/i.test(f)) {
+                try {
+                    const j = JSON.parse(raw);
+                    const dbg = (j.engine && j.engine.debug !== undefined) ? j.engine.debug
+                              : (j.debug !== undefined ? j.debug : undefined);
+                    if (dbg !== undefined) return dbg ? 'debug' : 'release';
+                } catch (e) {}
+            }
+            // .js 는 물론, JSON 파싱에 실패한 .json 도 텍스트로 한 번 더 본다.
+            if (/["']?debug["']?\s*:\s*true/.test(raw)) return 'debug';
+            if (/["']?debug["']?\s*:\s*false/.test(raw)) return 'release';
+        }
+    }
+    // CC3 는 릴리즈에서만 번들에 md5 를 박는다. application.js 맨몸이면 디버그.
+    try {
+        const root = fs.readdirSync(dir);
+        if (root.some(f => /^application\.[0-9a-f]{5,}\.js$/i.test(f))) return 'release';
+        if (root.indexOf('application.js') >= 0) return 'debug';
+    } catch (e) {}
+    return null;
+}
+
+// 릴리즈 산출물인가. 지문이 우선, 없으면 경로에 debug 가 섞였는지로 본다.
+//   ⚠ 116SpaceVaves 처럼 -debug 폴더에 릴리즈 산출물이 들어앉은 사례가 있어
+//     폴더명만 믿으면 안 된다(그 반대도 마찬가지).
+function isReleaseBuild(dir) {
+    const f = buildFlag(dir);
+    if (f) return f === 'release';
+    return !/[-_]debug/i.test(dir.split(BS).join('/'));
+}
+
+// 빌드 폴더 후보를 만들어 실제 index.html 이 있는 **릴리즈** 경로를 고른다.
+//   폴더 구조가 제각각이라(평면 / web-mobile 2단계 / Egret bin-release) 전부 훑는다.
+//   ⚠ 로컬 뷰어는 릴리즈만 연다 — 디버그 산출물은 후보에서 통째로 뺀다.
 function resolveBuild(code) {
     const names = CODE2NAMES[code] || [];
     const cands = [];
     for (const n of names) {
-        for (const suffix of ['-debug', '-release', '']) {
+        // 릴리즈 계열 접미사만. -debug/-qa2/-fs/-ori/-restore 는 쳐다보지 않는다.
+        for (const suffix of ['-release', '-live', '']) {
             cands.push(path.join(BUILD_ROOT, n + suffix));
             cands.push(path.join(BUILD_ROOT, n + suffix, 'web-mobile'));
         }
-        // Egret 계열은 프로젝트 폴더 안에 있다
+        // Egret 계열은 프로젝트 폴더 안에 있다(bin-release 가 곧 릴리즈)
         cands.push(path.join('C:/Users/a/Documents/Projects', n, 'egret/bin-release/web/kakao'));
         cands.push(path.join('C:/Users/a/Documents/Projects', n, 'build/web-mobile'));
     }
     for (const c of cands) {
-        try { if (fs.existsSync(path.join(c, 'index.html'))) return c; } catch (e) {}
+        try {
+            if (!fs.existsSync(path.join(c, 'index.html'))) continue;
+            if (!isReleaseBuild(c)) continue;
+            return c;
+        } catch (e) {}
     }
     return null;
 }
@@ -160,9 +216,9 @@ a{font-weight:600;text-decoration:none;color:#0b62d0} code{background:#f2f2f2;pa
 <h1>카카오 H5 로컬 뷰어</h1>
 <div class="note">127.0.0.1 접속이라 <b>비카카오(standalone)</b> 로 실행됩니다 — 로그인 없이 열리고 9999 가 나지 않습니다.<br>
 카카오 로그·랭킹·공유는 동작하지 않습니다. 그쪽은 런처의 <b>테스트 진입 링크</b>를 쓰세요.<br>
-⚠️ <code>?provider=kakao</code> 를 붙이면 다시 9999 가 납니다.</div>
+⚠️ <code>?provider=kakao</code> 를 붙이면 다시 9999 가 납니다.<br>📦 <b>릴리즈 빌드만</b> 서빙합니다 — 디버그 산출물은 후보에서 제외됩니다.</div>
 <h2>빌드됨 (${ok.length})</h2><ul>${ok.map(li).join('')}</ul>
-<h2>빌드 없음 (${no.length})</h2><ul>${no.map(li).join('')}</ul>`;
+<h2>릴리즈 빌드 없음 (${no.length})</h2><ul>${no.map(li).join('')}</ul>`;
 }
 
 const handler = (req, res) => {
@@ -195,7 +251,7 @@ const handler = (req, res) => {
     const rest = m[2] && m[2] !== '/' ? m[2] : '/index.html';
     const base = resolveBuild(code);
     if (!base) { res.writeHead(404, {'Content-Type':'text/html; charset=utf-8'});
-        return res.end('빌드를 찾지 못했습니다: ' + code + ' — <a href="/">목록</a>'); }
+        return res.end('릴리즈 빌드를 찾지 못했습니다: ' + code + ' — 디버그 산출물은 로컬 뷰어에서 열지 않습니다. <a href="/">목록</a>'); }
     const file = path.join(base, rest);
     if (!file.startsWith(base)) { res.writeHead(403); return res.end('forbidden'); }
     fs.readFile(file, (err, buf) => {
