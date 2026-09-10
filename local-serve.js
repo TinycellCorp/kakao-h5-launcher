@@ -21,6 +21,7 @@ const http = require('http');
 const https = require('https');
 const url = require('url');
 const os = require('os');
+const zlib = require('zlib');
 
 const PORT = 5500;
 // 0.0.0.0 으로 열어야 같은 공유기의 다른 PC/모바일에서도 붙을 수 있다.
@@ -59,6 +60,7 @@ const EXTRA = {
     fe242akk: ['07MergeDrop', '머지브레인롯'],
     '4b2us7wa': ['106-drop-the-ball', '드롭더볼'],
     '52c1wzya': ['20SortWool', '울소트퍼즐'],
+    wxyqsakl: ['Z-PocketBall', '포켓볼'],
 };
 for (const k in EXTRA) { if (!CODE2NAMES[k]) CODE2NAMES[k] = EXTRA[k]; }
 
@@ -91,23 +93,30 @@ function resolveBuild(code) {
 const HI5_HOST_SHIM = [
 '<script>(function(){',
 '  if (window.__hi5HostShim) return; window.__hi5HostShim = 1;',
-'  var sent = false;',
-'  function reply(){',
-'    if (sent) return; sent = true;',
-'    window.postMessage({ fromhi5action: "GAME_DATA", data: {',
+'  /* 기본 언어를 한국어로. Hi5Helper 계열은 localStorage._hi5_lang 을 최우선으로 읽고,',
+'     없으면 navigator.language 를 따른다 — 브라우저가 영어면 영문으로 떠서 확인이 불편하다.',
+'     이미 값이 있으면(게임 안에서 바꾼 경우) 존중해 덮어쓰지 않는다. */',
+'  try { if (!localStorage.getItem("_hi5_lang")) localStorage.setItem("_hi5_lang", "ko"); } catch (e) {}',
+'  function payload(){',
+'    return { fromhi5action: "GAME_DATA", data: {',
 '      game_data: { high_score: 0, score: 0 },',
 '      user_data: {},',
 '      platform_data: { platform: "local", os: "", vibration: 0, SafeArea: { top: 0, bottom: 0 }, ads: {}, products: {} },',
 '      current_time: Date.now()',
-'    } }, "*");',
+'    } };',
 '  }',
-'  // 게임이 INIT_SDK 를 보내면 즉시 응답한다.',
-'  window.addEventListener("message", function(e){',
-'    var d = e && e.data; if (!d || !d.fromhi5action) return;',
+'  function reply(){ try { window.postMessage(payload(), "*"); } catch (e) {} }',
+'  /* 게임이 INIT_SDK 를 보내면 즉시 응답한다(iframe 이 없으면 parent===self 라 여기로 온다). */',
+'  window.addEventListener("message", function(ev){',
+'    var d = ev && ev.data; if (!d || !d.fromhi5action) return;',
 '    if (d.fromhi5action === "INIT_SDK") reply();',
 '  });',
-'  // INIT_SDK 를 안 보내는 구현도 있어 안전망으로 한 번 더 쏜다(중복은 sent 로 차단).',
-'  setTimeout(reply, 1200);',
+'  /* ⚠ 한 번만 쏘면 안 된다 — 느린 환경(터널/모바일)에서는 게임이 아직 message 리스너를',
+'     등록하기 전이라 그 한 발을 놓치고 Loading 에서 영영 멈춘다(실제로 겪음).',
+'     게임 쪽에 _inited 중복 가드가 있어 여러 번 받아도 안전하므로 주기적으로 재발송한다. */',
+'  var n = 0;',
+'  var t = setInterval(function(){ reply(); if (++n >= 40) clearInterval(t); }, 300);',
+'  window.addEventListener("load", reply);',
 '})();</script>'
 ].join(String.fromCharCode(10));
 
@@ -122,6 +131,16 @@ const MIME = {
     '.atlas':'text/plain; charset=utf-8', '.plist':'text/xml; charset=utf-8',
     '.fnt':'text/plain; charset=utf-8', '.txt':'text/plain; charset=utf-8',
 };
+
+// 터널(Cloudflare) 경유는 파일마다 왕복 지연이 붙어 Cocos 의 수백 개 에셋 로드가 느리다.
+//   텍스트 계열만 gzip 하면 전송량이 크게 준다. 이미 압축된 이미지/오디오는 건드리지 않는다.
+const GZIP_EXT = ['.html', '.js', '.mjs', '.css', '.json', '.txt', '.atlas', '.fnt', '.plist'];
+function pickEncoding(req, ext) {
+    if (GZIP_EXT.indexOf(ext) === -1) return null;
+    const ae = String(req.headers['accept-encoding'] || '');
+    if (ae.indexOf('gzip') === -1) return null;
+    return 'gzip';
+}
 
 function indexPage() {
     const rows = Object.keys(CODE2NAMES).map(code => {
@@ -182,9 +201,8 @@ const handler = (req, res) => {
     fs.readFile(file, (err, buf) => {
         if (err) { res.writeHead(404); return res.end('not found: ' + rest); }
         const ext = path.extname(file).toLowerCase();
-        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream',
-            'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=60' });
         // index.html 에만 shim 을 끼운다. </head> 앞에 넣어 게임 스크립트보다 먼저 돌게 한다.
+        let out = buf;
         if (ext === '.html') {
             let html = buf.toString('utf8');
             if (html.indexOf('__hi5HostShim') === -1) {
@@ -192,9 +210,25 @@ const handler = (req, res) => {
                     ? html.replace('</head>', HI5_HOST_SHIM + '</head>')
                     : HI5_HOST_SHIM + html;
             }
-            return res.end(html);
+            out = Buffer.from(html, 'utf8');
         }
-        res.end(buf);
+        // ⚠ writeHead 는 압축 여부가 정해진 뒤 **한 번만** 부른다.
+        //   먼저 writeHead 해두고 나중에 setHeader 를 부르면 ERR_HTTP_HEADERS_SENT 로 죽는다(실제로 겪음).
+        const headers = {
+            'Content-Type': MIME[ext] || 'application/octet-stream',
+            'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=86400',
+        };
+        if (pickEncoding(req, ext) === 'gzip') {
+            return zlib.gzip(out, (gerr, gz) => {
+                if (gerr) { res.writeHead(200, headers); return res.end(out); }
+                headers['Content-Encoding'] = 'gzip';
+                headers['Vary'] = 'Accept-Encoding';
+                res.writeHead(200, headers);
+                res.end(gz);
+            });
+        }
+        res.writeHead(200, headers);
+        res.end(out);
     });
 };
 
