@@ -44,15 +44,44 @@
     .opt.liveov { background:#e2f6e7; color:#1e8449; }
     .opt.disabled { opacity:.4; pointer-events:none; }
     .opt .tag { font-size:10px; background:rgba(0,0,0,.08); padding:2px 7px; border-radius:999px; }
+    /* 로컬 모드 — 우상단 토글. 켜면 모든 진입이 로컬 뷰어(127.0.0.1:5500)로 바뀐다. */
+    .localbar { position:fixed; top:14px; right:16px; z-index:101; display:flex; align-items:center; gap:8px;
+      background:rgba(255,255,255,.92); padding:6px 10px; border-radius:999px; box-shadow:0 2px 8px rgba(0,0,0,.12); }
+    body.local-mode .localbar { background:rgba(18,32,58,.92); box-shadow:0 2px 8px rgba(0,0,0,.5); }
+    .localbar label { font-size:12px; color:#666; cursor:pointer; user-select:none; }
+    .sw { position:relative; width:42px; height:24px; background:#ccd1d9; border-radius:999px; cursor:pointer; transition:background .18s; flex:none; }
+    .sw::after { content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; background:#fff; border-radius:50%; transition:transform .18s; box-shadow:0 1px 3px rgba(0,0,0,.25); }
+    .sw.on { background:#0b62d0; } .sw.on::after { transform:translateX(18px); }
+    body.local-mode { background:#0e1420; }
+    body.local-mode .wrap { color:#e6ebf2; }
+    body.local-mode h1, body.local-mode .localbar label { color:#e6ebf2; }
+    .localnote { display:none; background:#12203a; border-left:3px solid #3d8bff; color:#cfe0ff;
+      padding:9px 12px; border-radius:8px; font-size:12px; line-height:1.6; margin:10px 0 4px; }
+    body.local-mode .localnote { display:block; }
+    .localnote code { background:rgba(255,255,255,.12); padding:1px 5px; border-radius:3px; }
+    .opt.local { background:#12203a; color:#8fc0ff; }
+    .opt.localperf { background:#1a2b12; color:#a8e07a; }
     .close { width:100%; padding:13px; border:none; background:#eef0f3; border-radius:11px; font-size:14px; font-weight:700; color:#555; cursor:pointer; margin-top:4px; }
   </style>
 </head>
 <body>
+<!-- 로컬 모드 토글 — .wrap 밖(body 직속)에 둔다. 안에 두면 스택 컨텍스트에 갇혀
+     시트 오버레이(z-index:100)에 가려 클릭이 막힌다. -->
+<div class="localbar">
+  <label for="localsw">로컬 모드</label>
+  <div class="sw" id="localsw" role="switch" aria-checked="false" tabindex="0"></div>
+</div>
+
 <div class="wrap">
   <header>
     <h1><span class="dot"></span>카카오 H5 게임 런처</h1>
     <input class="search" id="q" type="search" placeholder="게임 이름 / 번호 검색…" autocomplete="off" />
     <div class="meta" id="meta"></div>
+    <div class="localnote">
+      <b>로컬 뷰어 모드</b> — 빌드 산출물을 내 PC 에서 바로 연다. 카카오 로그인이 필요 없다.<br>
+      먼저 서버를 띄운다: <code>node local-serve.js --http</code> (이 폴더에서)<br>
+      ⚠️ 비카카오(standalone)로 실행되어 <b>로그·랭킹·공유는 동작하지 않는다</b>. 게임플레이·성능 확인용.
+    </div>
   </header>
   <div id="list"></div>
 </div>
@@ -165,6 +194,22 @@ const GAMES = [
   // 테스트 — 백엔드 제공 임시 h5Id(20797)/code(padypuo3). serverType auto 검증용(QA→qa, Live→live 자동감지)
   { g:'테스트', no:47, id:'20797', name:'테스트', qa:'padypuo3', live:'padypuo3' },
 ];
+
+// ── 로컬 뷰어 모드 ────────────────────────────────────────────────────────
+//   local-serve.js 가 GameCode 로 빌드 폴더를 찾아 서빙한다(폴더 구조가 제각각이라 서버가 흡수).
+//   127.0.0.1 로 접속하면 게임이 비카카오(standalone)로 떠서 카카오 로그인이 필요 없다 —
+//   직접 QA URL 을 치면 인증이 없어 9999 가 나던 문제를 우회하는 경로다.
+const LOCAL_ORIGIN = "http://127.0.0.1:5500";
+let LOCAL_MODE = false;
+try { LOCAL_MODE = localStorage.getItem("kakaoLauncherLocalMode") === "1"; } catch (e) {}
+function localUrlFor(game, extraQuery) {
+  const code = game.qa || game.live;
+  if (!code) return null;
+  let u = LOCAL_ORIGIN + "/" + code + "/";
+  // ⚠ provider=kakao 는 붙이지 않는다 — 붙이면 다시 카카오로 판정되어 9999 가 난다.
+  if (extraQuery) u += "?" + extraQuery;
+  return u;
+}
 
 const HOST = { qa:'qa-gameplay.game.kakao.com', live:'gameplay.game.kakao.com' };
 // 카카오 테스트 공용 진입 링크 — 게임 URL을 url 파라미터로 감싸 채팅방 전송 후 실행 확인
@@ -340,10 +385,25 @@ function openSheet(g) {
     document.getElementById(id).closest('.opt-row').classList.toggle('hidden', direct);
   });
   if (!direct) {
-    setOpt(document.getElementById('m-qa'),     urlFor(g,'qa',false));
-    setOpt(document.getElementById('m-qaov'),   urlFor(g,'qa',true));
-    setOpt(document.getElementById('m-live'),   urlFor(g,'live',false));
-    setOpt(document.getElementById('m-liveov'), urlFor(g,'live',true));
+    if (LOCAL_MODE) {
+      // 로컬 모드: QA/Live 구분이 없다(같은 빌드 산출물을 연다). 대신 성능 오버레이를 제공.
+      const a1 = document.getElementById('m-qa'), a2 = document.getElementById('m-qaov');
+      a1.className = 'opt local';  a1.innerHTML = '로컬에서 열기 <span class="tag">127.0.0.1</span>';
+      a2.className = 'opt localperf'; a2.innerHTML = '로컬 + 성능 오버레이 <span class="tag">perf</span>';
+      setOpt(a1, localUrlFor(g));
+      setOpt(a2, localUrlFor(g, 'perf=1'));
+      // Live 두 줄은 로컬 모드에서 의미가 없다 → 숨긴다.
+      document.getElementById('m-live').closest('.opt-row').classList.add('hidden');
+      document.getElementById('m-liveov').closest('.opt-row').classList.add('hidden');
+    } else {
+      const a1 = document.getElementById('m-qa'), a2 = document.getElementById('m-qaov');
+      a1.className = 'opt qa';   a1.innerHTML = 'QA <span class="tag">기본</span>';
+      a2.className = 'opt qaov'; a2.innerHTML = 'QA + 로그오버레이 <span class="tag">logOverlay</span>';
+      setOpt(a1, urlFor(g,'qa',false));
+      setOpt(a2, urlFor(g,'qa',true));
+      setOpt(document.getElementById('m-live'),   urlFor(g,'live',false));
+      setOpt(document.getElementById('m-liveov'), urlFor(g,'live',true));
+    }
   }
   // 직접 URL 진행 — url 이 있는 게임에서만 단일 행을 노출한다.
   const urlRow = document.getElementById('m-url-row');
@@ -357,11 +417,29 @@ function openSheet(g) {
     document.getElementById('m-extra-tag').textContent = g.extra.tag || '';
     setOpt(document.getElementById('m-extra'), urlFor(g,'qa',false,g.extra.q));
   }
+  window.__lastGame = g;
   overlay.classList.add('show');
 }
 function closeSheet() { overlay.classList.remove('show'); }
 document.getElementById('m-close').addEventListener('click', closeSheet);
 overlay.addEventListener('click', e => { if (e.target === overlay) closeSheet(); });
+
+// ── 로컬 모드 토글 ────────────────────────────────────────────────────────
+const localSw = document.getElementById("localsw");
+function applyLocalMode() {
+  document.body.classList.toggle("local-mode", LOCAL_MODE);
+  localSw.classList.toggle("on", LOCAL_MODE);
+  localSw.setAttribute("aria-checked", LOCAL_MODE ? "true" : "false");
+  try { localStorage.setItem("kakaoLauncherLocalMode", LOCAL_MODE ? "1" : "0"); } catch (e) {}
+  // 시트가 열려 있으면 링크를 즉시 갱신한다(닫았다 다시 열 필요 없게).
+  if (overlay.classList.contains("show") && window.__lastGame) openSheet(window.__lastGame);
+}
+function toggleLocal() { LOCAL_MODE = !LOCAL_MODE; applyLocalMode(); }
+localSw.addEventListener("click", toggleLocal);
+localSw.addEventListener("keydown", e => {
+  if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggleLocal(); }
+});
+applyLocalMode();
 
 qEl.addEventListener('input', render);
 render();
