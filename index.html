@@ -80,6 +80,7 @@
     <div class="localnote">
       <b>로컬 뷰어 모드</b> — 빌드 산출물을 내 PC 에서 바로 연다. 카카오 로그인이 필요 없다.<br>
       먼저 서버를 띄운다: <code>node local-serve.js --http</code> (이 폴더에서)<br>
+      다른 PC·모바일에서 볼 때는 서버가 출력한 <code>http://&lt;PC-IP&gt;:5500/launcher</code> 로 접속한다.<br>
       ⚠️ 비카카오(standalone)로 실행되어 <b>로그·랭킹·공유는 동작하지 않는다</b>. 게임플레이·성능 확인용.
     </div>
   </header>
@@ -199,7 +200,13 @@ const GAMES = [
 //   local-serve.js 가 GameCode 로 빌드 폴더를 찾아 서빙한다(폴더 구조가 제각각이라 서버가 흡수).
 //   127.0.0.1 로 접속하면 게임이 비카카오(standalone)로 떠서 카카오 로그인이 필요 없다 —
 //   직접 QA URL 을 치면 인증이 없어 9999 가 나던 문제를 우회하는 경로다.
-const LOCAL_ORIGIN = "http://127.0.0.1:5500";
+//   ⚠ 주소를 고정하면 안 된다. 모바일/다른 PC 에서 열었을 때 127.0.0.1 은 "그 기기 자신"을
+//     가리켜 아무것도 안 뜬다. 런처가 서버로부터 http 로 열렸다면 그 origin 을 그대로 쓴다.
+//     (서버가 /launcher 로 런처를 서빙하므로 모바일은 그 경로로 들어온다)
+//     file:// 로 연 경우에만 이 PC 기본값으로 폴백한다.
+const LOCAL_ORIGIN = (location.protocol === "http:" || location.protocol === "https:")
+  ? location.origin
+  : "http://127.0.0.1:5500";
 let LOCAL_MODE = false;
 try { LOCAL_MODE = localStorage.getItem("kakaoLauncherLocalMode") === "1"; } catch (e) {}
 function localUrlFor(game, extraQuery) {

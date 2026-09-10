@@ -20,9 +20,20 @@ const path = require('path');
 const http = require('http');
 const https = require('https');
 const url = require('url');
+const os = require('os');
 
 const PORT = 5500;
-const HOST = '127.0.0.1';
+// 0.0.0.0 으로 열어야 같은 공유기의 다른 PC/모바일에서도 붙을 수 있다.
+//   ⚠ 사내망/개인망 전용. 방화벽에서 5500 인바운드 허용이 필요할 수 있다.
+const HOST = '0.0.0.0';
+function lanIPs() {
+    const out = [];
+    const ifs = os.networkInterfaces();
+    for (const k in ifs) for (const a of ifs[k] || []) {
+        if (a.family === 'IPv4' && !a.internal) out.push(a.address);
+    }
+    return out;
+}
 const BUILD_ROOT = 'C:/Users/a/Desktop/Build';
 const MAP_FILE = 'C:/Users/a/Documents/hi5-sdk/scripts/kakao-gamecodes.json';
 const USE_HTTP = process.argv.includes('--http');
@@ -113,6 +124,14 @@ const handler = (req, res) => {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
         return res.end(indexPage());
     }
+    // 런처 UI 도 서빙한다 — 모바일/다른 PC 는 file:// 로 런처를 열 수 없다.
+    if (p === '/launcher' || p === '/launcher/') {
+        return fs.readFile(path.join(__dirname, 'index.html'), (err, buf) => {
+            if (err) { res.writeHead(404); return res.end('launcher not found'); }
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+            res.end(buf);
+        });
+    }
     const m = p.match(/^\/([A-Za-z0-9]+)(\/.*)?$/);
     if (!m) { res.writeHead(404); return res.end('not found'); }
     const code = m[1];
@@ -143,8 +162,17 @@ else {
 server.listen(PORT, HOST, () => {
     console.log('========================================================');
     console.log(' 카카오 H5 로컬 뷰어');
-    console.log('  목록:  ' + scheme + '://' + HOST + ':' + PORT + '/');
-    console.log('  게임:  ' + scheme + '://' + HOST + ':' + PORT + '/<GameCode>/');
+    console.log('  이 PC :  ' + scheme + '://127.0.0.1:' + PORT + '/');
+    const ips = lanIPs();
+    if (ips.length) {
+        console.log('  같은 공유기의 다른 기기(모바일 등):');
+        ips.forEach(function (ip) {
+            console.log('    목록   ' + scheme + '://' + ip + ':' + PORT + '/');
+            console.log('    런처   ' + scheme + '://' + ip + ':' + PORT + '/launcher');
+        });
+    } else {
+        console.log('  (LAN IP 를 찾지 못했습니다 — 네트워크 연결 확인)');
+    }
     console.log('  종료:  Ctrl+C');
     console.log('========================================================');
 });
