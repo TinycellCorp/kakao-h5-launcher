@@ -82,6 +82,35 @@ function resolveBuild(code) {
     return null;
 }
 
+// ── hi5 호스트 흉내내기 ────────────────────────────────────────────────────
+//   일부 게임(예: Z-JumpUpGirl)은 비카카오에서 Hi5.Init_SDK 로 부모 iframe 에
+//   INIT_SDK 를 보낸 뒤 GAME_DATA 응답을 기다린다. 로컬 뷰어는 iframe 없이 단독으로 열어
+//   그 응답이 영영 오지 않아 Loading 씬에서 멈춘다(리소스는 정상 로드된다).
+//   → 게임이 보내는 postMessage 를 받아 GAME_DATA 를 자기 자신에게 돌려준다.
+//   shape 은 hi5-sdk 의 _synthInitArgs() 와 동일하게 맞춘다.
+const HI5_HOST_SHIM = [
+'<script>(function(){',
+'  if (window.__hi5HostShim) return; window.__hi5HostShim = 1;',
+'  var sent = false;',
+'  function reply(){',
+'    if (sent) return; sent = true;',
+'    window.postMessage({ fromhi5action: "GAME_DATA", data: {',
+'      game_data: { high_score: 0, score: 0 },',
+'      user_data: {},',
+'      platform_data: { platform: "local", os: "", vibration: 0, SafeArea: { top: 0, bottom: 0 }, ads: {}, products: {} },',
+'      current_time: Date.now()',
+'    } }, "*");',
+'  }',
+'  // 게임이 INIT_SDK 를 보내면 즉시 응답한다.',
+'  window.addEventListener("message", function(e){',
+'    var d = e && e.data; if (!d || !d.fromhi5action) return;',
+'    if (d.fromhi5action === "INIT_SDK") reply();',
+'  });',
+'  // INIT_SDK 를 안 보내는 구현도 있어 안전망으로 한 번 더 쏜다(중복은 sent 로 차단).',
+'  setTimeout(reply, 1200);',
+'})();</script>'
+].join(String.fromCharCode(10));
+
 const MIME = {
     '.html':'text/html; charset=utf-8', '.js':'application/javascript; charset=utf-8',
     '.mjs':'application/javascript; charset=utf-8', '.css':'text/css; charset=utf-8',
@@ -118,6 +147,15 @@ a{font-weight:600;text-decoration:none;color:#0b62d0} code{background:#f2f2f2;pa
 }
 
 const handler = (req, res) => {
+    // 접속 로그 — 다른 기기에서 정말 도달하는지 확인하는 용도.
+    //   여기에 안 찍히면 네트워크(공유기 AP 격리/다른 망)에서 막힌 것이고,
+    //   찍히는데 화면이 안 뜨면 주소/경로 문제다.
+    try {
+        const ip = (req.socket && req.socket.remoteAddress || '').replace('::ffff:', '');
+        if (ip && ip !== '127.0.0.1' && ip !== '::1') {
+            console.log('[접속] ' + ip + '  ' + req.method + ' ' + req.url);
+        }
+    } catch (e) {}
     const u = url.parse(req.url);
     let p = decodeURIComponent(u.pathname);
     if (p === '/' || p === '/index.html') {
@@ -146,6 +184,16 @@ const handler = (req, res) => {
         const ext = path.extname(file).toLowerCase();
         res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream',
             'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=60' });
+        // index.html 에만 shim 을 끼운다. </head> 앞에 넣어 게임 스크립트보다 먼저 돌게 한다.
+        if (ext === '.html') {
+            let html = buf.toString('utf8');
+            if (html.indexOf('__hi5HostShim') === -1) {
+                html = html.indexOf('</head>') >= 0
+                    ? html.replace('</head>', HI5_HOST_SHIM + '</head>')
+                    : HI5_HOST_SHIM + html;
+            }
+            return res.end(html);
+        }
         res.end(buf);
     });
 };
