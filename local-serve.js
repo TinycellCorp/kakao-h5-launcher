@@ -23,7 +23,13 @@ const url = require('url');
 const os = require('os');
 const zlib = require('zlib');
 
-const PORT = 5500;
+// 기본 5500. 다른 작업이 5500 인스턴스를 쓰고 있을 때 건드리지 않고 따로 띄우려면
+//   node local-serve.js --http --port 5502
+const PORT = (() => {
+    const i = process.argv.indexOf('--port');
+    const v = i >= 0 ? parseInt(process.argv[i + 1], 10) : NaN;
+    return Number.isInteger(v) && v > 0 && v < 65536 ? v : 5500;
+})();
 // 0.0.0.0 으로 열어야 같은 공유기의 다른 PC/모바일에서도 붙을 수 있다.
 //   ⚠ 사내망/개인망 전용. 방화벽에서 5500 인바운드 허용이 필요할 수 있다.
 const HOST = '0.0.0.0';
@@ -61,6 +67,7 @@ const EXTRA = {
     '4b2us7wa': ['106-drop-the-ball', '드롭더볼'],
     '52c1wzya': ['20SortWool', '울소트퍼즐'],
     wxyqsakl: ['Z-PocketBall', '포켓볼'],
+    ai1w3dvt: ['46SolitaireCookingTower', '쿠킹타워 솔리테어'],
 };
 for (const k in EXTRA) { if (!CODE2NAMES[k]) CODE2NAMES[k] = EXTRA[k]; }
 
@@ -71,6 +78,12 @@ for (const k in EXTRA) { if (!CODE2NAMES[k]) CODE2NAMES[k] = EXTRA[k]; }
 //   CC2: src/settings.js 의 debug:true|false
 //   판정 불가면 null 을 돌려주고 폴더명으로 2차 판정한다.
 function buildFlag(dir) {
+    // Egret 은 CC 와 산출물 구조가 아예 다르다 — settings.*.js/json 도 application.<md5>.js 도 없어서
+    //   아래 CC 용 판독이 전부 실패하고 null 로 떨어진다. 대신 Egret 은 빌드 타입이
+    //   **경로에 박혀 있다**(bin-release / bin-debug). 그게 Egret 의 지문이다.
+    const norm = dir.split(BS).join('/');
+    if (/\/bin-release(\/|$)/i.test(norm)) return 'release';
+    if (/\/bin-debug(\/|$)/i.test(norm)) return 'debug';
     // settings 는 엔진/버전마다 루트에도 src/ 에도, .json 으로도 .js 로도 나온다.
     //   CC2.4  → src/settings.<hash>.js  안의 debug:true|false
     //   CC3.8  → src/settings.<hash>.json 안의 engine.debug
@@ -114,6 +127,50 @@ function isReleaseBuild(dir) {
     return !/[-_]debug/i.test(dir.split(BS).join('/'));
 }
 
+const PROJECT_ROOT = 'C:/Users/a/Documents/Projects';
+
+// Egret 산출물 후보를 프로젝트 폴더에서 **실제로 훑어** 만든다.
+//   구조는 <프로젝트>/<egret 폴더>/bin-release/[web/]<타겟>/index.html 인데
+//   가운데 폴더 이름이 프로젝트마다 제각각이다:
+//     37AgeOf2048/egret · 46SolitaireCookingTower/egret · EgretAirplane|Archery|Mole/allofgames
+//     EgretCat2048/egret_cat2048 · EgretSmashKing/egret_smashking
+//   'egret' 한 가지로 고정돼 있어서 37AgeOf2048 만 열리고 나머지 Egret 은 전부 못 찾았다.
+function egretCandidates(projDir) {
+    const hits = [];
+    let subs = [];
+    try { subs = fs.readdirSync(projDir, { withFileTypes: true }); } catch (e) { return hits; }
+    for (const s of subs) {
+        if (!s.isDirectory()) continue;
+        // node_modules/libs 같은 큰 폴더를 헛되이 훑지 않도록 bin-release 유무로 먼저 거른다.
+        const binRel = path.join(projDir, s.name, 'bin-release');
+        let tgts = [];
+        try { tgts = fs.readdirSync(binRel, { withFileTypes: true }); } catch (e) { continue; }
+        for (const t of tgts) {
+            if (!t.isDirectory()) continue;
+            // bin-release/web/<타겟> 과 bin-release/<타겟> 둘 다 나온다.
+            if (/^web$/i.test(t.name)) {
+                let leaves = [];
+                try { leaves = fs.readdirSync(path.join(binRel, 'web'), { withFileTypes: true }); } catch (e) { continue; }
+                for (const l of leaves) {
+                    if (l.isDirectory()) hits.push(path.join(binRel, 'web', l.name));
+                }
+            } else {
+                hits.push(path.join(binRel, t.name));
+            }
+        }
+    }
+    // 카카오 타겟을 최우선으로. 같은 bin-release 안에 crazygames/타임스탬프 빌드가 섞여 있어
+    //   정렬 없이 첫 번째를 집으면 엉뚱한 플랫폼 빌드가 뽑힌다(38AgeOfSolitaire 실사례).
+    //   카카오 타겟이 없으면 이름 역순 — 타임스탬프 폴더는 그게 곧 최신이다.
+    hits.sort((a, b) => {
+        const ka = /kakao/i.test(path.basename(a)) ? 1 : 0;
+        const kb = /kakao/i.test(path.basename(b)) ? 1 : 0;
+        if (ka !== kb) return kb - ka;
+        return path.basename(b).localeCompare(path.basename(a));
+    });
+    return hits;
+}
+
 // 빌드 폴더 후보를 만들어 실제 index.html 이 있는 **릴리즈** 경로를 고른다.
 //   폴더 구조가 제각각이라(평면 / web-mobile 2단계 / Egret bin-release) 전부 훑는다.
 //   ⚠ 로컬 뷰어는 릴리즈만 연다 — 디버그 산출물은 후보에서 통째로 뺀다.
@@ -126,9 +183,10 @@ function resolveBuild(code) {
             cands.push(path.join(BUILD_ROOT, n + suffix));
             cands.push(path.join(BUILD_ROOT, n + suffix, 'web-mobile'));
         }
-        // Egret 계열은 프로젝트 폴더 안에 있다(bin-release 가 곧 릴리즈)
-        cands.push(path.join('C:/Users/a/Documents/Projects', n, 'egret/bin-release/web/kakao'));
-        cands.push(path.join('C:/Users/a/Documents/Projects', n, 'build/web-mobile'));
+        // Egret 계열은 프로젝트 폴더 안에 있다(bin-release 가 곧 릴리즈).
+        //   폴더 이름이 프로젝트마다 달라 실제로 훑어야 한다.
+        for (const e of egretCandidates(path.join(PROJECT_ROOT, n))) cands.push(e);
+        cands.push(path.join(PROJECT_ROOT, n, 'build/web-mobile'));
     }
     for (const c of cands) {
         try {
