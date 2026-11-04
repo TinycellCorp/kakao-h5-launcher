@@ -173,7 +173,8 @@ const GAMES = [
   { g:'미니앱', no:36, id:'20785', name:'포츈쿠키',       qa:'87nfawe0', live:'87nfawe0' },
   { g:'미니앱', no:37, id:'20788', name:'심리테스트',      qa:'at76u7lo', live:'at76u7lo' },
   { g:'미니앱', no:38, id:'20789', name:'당신의 운명',      qa:'pbp3p892', live:'pbp3p892' },
-  // 3차 업데이트 — Live URL 미발급분은 QA 코드를 Live 호스트에 그대로 적용
+  // 3차 업데이트 11종 — 세로 7 + 가로 3 + 꺼내냥(신규)
+  //   Live URL 미발급분은 QA 코드를 Live 호스트에 그대로 적용
   { g:'3차 업데이트', no:39, id:'20707', name:'마이아이돌',       qa:'niqukpf5', live:'niqukpf5' },
   { g:'3차 업데이트', no:40, id:'20730', name:'우드 블라스트',    qa:'oc9bkees', live:'oc9bkees' },
   { g:'3차 업데이트', no:41, id:'20731', name:'스페이스쉽 슈터',  qa:'g1gvmgc9', live:'g1gvmgc9' },
@@ -181,11 +182,14 @@ const GAMES = [
   { g:'3차 업데이트', no:43, id:'20790', name:'수박 메이커',      qa:'2bvtvfv8', live:'2bvtvfv8' },
   { g:'3차 업데이트', no:44, id:'20791', name:'애로우 매치',      qa:'jx96uq7v', live:'jx96uq7v' },
   { g:'3차 업데이트', no:45, id:'20792', name:'울 3D매치',       qa:'yfbcukjb', live:'yfbcukjb' },
-  { g:'3차 업데이트', no:46, id:'20749', name:'쿠킹 타워 솔리테어', qa:'ai1w3dvt', live:'ai1w3dvt' },
-  // 가로(landscape) 고정 — 세로 웹뷰에서 게임만 회전해 GNB/토스트 배치 확인이 별도로 필요하므로 그룹 분리
-  { g:'가로게임', no:48, id:'20756', name:'프렌즈 러너',      qa:'niopwg1e', live:'niopwg1e' },
-  { g:'가로게임', no:49, id:'20741', name:'3D 프루츠 컷',     qa:'lggtdz2v', live:'lggtdz2v' },
-  { g:'가로게임', no:50, id:'20714', name:'포켓볼',            qa:'wxyqsakl', live:'wxyqsakl' },
+  // 가로(landscape) 고정 — 세로 웹뷰에서 게임만 회전해 GNB/토스트 배치를 따로 확인해야 하므로 land 표시
+  { g:'3차 업데이트', no:48, id:'20756', name:'프렌즈 러너',      qa:'niopwg1e', live:'niopwg1e', land:true },
+  { g:'3차 업데이트', no:49, id:'20741', name:'3D 프루츠 컷',     qa:'lggtdz2v', live:'lggtdz2v', land:true },
+  { g:'3차 업데이트', no:50, id:'20714', name:'포켓볼',            qa:'wxyqsakl', live:'wxyqsakl', land:true },
+  // 꺼내냥(CatSudoku) — 카카오 h5Id·업로드 코드 미발급. 발급되면 id/qa/live 채울 것
+  { g:'3차 업데이트', no:55, name:'꺼내냥',                         qa:null, live:null },
+  // 3차 목록에서 빠진 게임 — 그룹 재구성 시 제외됨
+  { g:'기타', no:46, id:'20749', name:'쿠킹 타워 솔리테어', qa:'ai1w3dvt', live:'ai1w3dvt' },
   // hi5games 플랫폼 — kakao gameplay 호스트·업로드 코드 체계가 아닌 고정 URL 직접 진입.
   // url 필드가 있으면 모달에서 kakao 4종 옵션 대신 '게임 열기' 단일 행이 노출된다.
   { g:'hi5games', no:50, name:'라이언붐붐',             url:'https://www.hi5games.top/games/47FriendsDefense/index.html' },
@@ -339,7 +343,7 @@ function render() {
     const b = document.createElement('button');
     b.className = 'game';
     b.innerHTML = `<span class="name">${g.no}. ${g.name}</span>
-      <span class="id">${g.id ? 'ID ' + g.id : (g.url ? '직접 URL' : 'ID 미정')}${(g.live || g.url) ? '' : ' · QA만'}</span>`;
+      <span class="id">${g.id ? 'ID ' + g.id : (g.url ? '직접 URL' : 'ID 미정')}${(g.live || g.url || !g.qa) ? '' : ' · QA만'}${g.land ? ' · 가로' : ''}</span>`;
     b.addEventListener('click', () => openSheet(g));
     grid.appendChild(b);
   });
